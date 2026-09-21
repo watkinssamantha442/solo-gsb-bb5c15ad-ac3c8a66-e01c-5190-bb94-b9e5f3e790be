@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# 本地 SQLite 数据库（容器内挂载到 volume）
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# 虚拟环境
+.venv/
+venv/
+
+# 系统/编辑器
+.DS_Store
+.idea/
+.vscode/

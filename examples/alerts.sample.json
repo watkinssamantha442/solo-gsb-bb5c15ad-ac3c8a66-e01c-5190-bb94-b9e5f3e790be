@@ -1,0 +1,42 @@
+[
+  {
+    "device_id": "FREEZER-01",
+    "batch_id": "B-2026-0901",
+    "level": "critical",
+    "alert_type": "TEMP_HIGH",
+    "message": "库温 -12.1℃ 高于阈值 -18℃",
+    "alert_time": "2026-09-21T09:05:00+08:00"
+  },
+  {
+    "deviceId": "FREEZER-01",
+    "batch": "B-2026-0901",
+    "severity": "warning",
+    "type": "TEMP_DRIFT",
+    "msg": "库温缓慢回升 -16.2℃",
+    "timestamp": "2026-09-21T09:18:00+08:00"
+  },
+  {
+    "device": "DOOR-COLD-01",
+    "batch_id": "B-2026-0901",
+    "level": "警告",
+    "alert_type": "DOOR_OPEN",
+    "message": "冷库门被打开（巡检）",
+    "alert_time": "2026-09-21T22:30:00+08:00"
+  },
+  {
+    "device_id": "REEFER-77",
+    "batch_id": "B-2026-0910",
+    "level": "info",
+    "alert_type": "GPS_HEARTBEAT",
+    "message": "运输心跳正常",
+    "alert_time": "2026-09-21T10:00:00Z"
+  },
+  {
+    "device_id": "SENSOR-09",
+    "batch_id": "B-2026-0911",
+    "level": 2,
+    "alert_type": "SENSOR_OFFLINE",
+    "message": "温度传感器离线（数值级别：1=critical,2=warning,3=info）",
+    "ts": 1789000000
+  }
+]

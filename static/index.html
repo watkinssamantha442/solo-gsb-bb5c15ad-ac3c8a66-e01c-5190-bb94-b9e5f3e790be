@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>冷链告警抑制策略沙盒</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">❄</span>
+    <div>
+      <h1>冷链告警抑制策略沙盒</h1>
+      <p class="subtitle">FastAPI + SQLite · 本地运行 · 无需第三方账号</p>
+    </div>
+  </div>
+  <div class="top-actions">
+    <label class="switch" title="逐条注入的 PASS 告警自动转发到内置模拟接收端">
+      <input type="checkbox" id="autoForward" />
+      <span>注入即转发</span>
+    </label>
+    <button class="btn ghost" id="btnDemo">载入演示场景</button>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="alerts">① 告警与决定</button>
+  <button class="tab" data-tab="rules">② 抑制规则</button>
+  <button class="tab" data-tab="compare">③ 策略前后对比</button>
+  <button class="tab" data-tab="receiver">④ 模拟接收端 <span id="inboxBadge" class="badge-count hidden">0</span></button>
+</nav>
+
+<main>
+  <!-- ========================= 告警 ========================= -->
+  <section id="tab-alerts" class="tab-panel active">
+    <div class="stats" id="statsBar">
+      <div class="stat"><span class="stat-num" id="statTotal">0</span><span class="stat-label">告警总数</span></div>
+      <div class="stat pass"><span class="stat-num" id="statPass">0</span><span class="stat-label">放行 PASS</span></div>
+      <div class="stat suppress"><span class="stat-num" id="statSuppress">0</span><span class="stat-label">抑制 SUPPRESS</span></div>
+      <div class="stat"><span class="stat-num" id="statRules">0</span><span class="stat-label">启用/全部规则</span></div>
+    </div>
+
+    <div class="card">
+      <h2>逐条注入告警</h2>
+      <p class="hint">粘贴一条告警 JSON。支持字段别名：device_id/device/deviceId、batch_id/batch/lot、level/severity（info|warning|critical，兼容“警告/严重”等中文）、time/timestamp/alertTime 等。</p>
+      <textarea id="injectJson" class="code-input" rows="8" spellcheck="false">{
+  "device_id": "FREEZER-02",
+  "batch_id": "B-2026-0907",
+  "level": "warning",
+  "alert_type": "TEMP_DRIFT",
+  "message": "库温缓慢回升 -16.0℃",
+  "alert_time": "2026-09-21T14:20:00+08:00"
+}</textarea>
+      <div class="row-actions">
+        <button class="btn primary" id="btnInject">注入此告警并评估</button>
+        <button class="btn" id="btnImportOpen">批量导入 JSON…</button>
+        <button class="btn warn" id="btnUndo">↩ 撤销最近注入</button>
+        <button class="btn danger-ghost" id="btnClearAlerts">清空告警</button>
+        <span id="injectMsg" class="msg"></span>
+      </div>
+    </div>
+
+    <div class="card hidden" id="importCard">
+      <h2>批量导入</h2>
+      <p class="hint">传入告警数组 <code>[ {…}, {…} ]</code>，系统会按顺序评估。</p>
+      <textarea id="importJson" class="code-input" rows="8" spellcheck="false">[
+  {"device_id": "FREEZER-01", "batch_id": "B-1", "level": "warning", "alert_type": "TEMP_DRIFT", "alert_time": "2026-09-21T10:00:00+08:00"}
+]</textarea>
+      <div class="row-actions">
+        <button class="btn primary" id="btnImportRun">导入并评估</button>
+        <label class="switch small"><input type="checkbox" id="importForward" /><span>同时转发全部 PASS</span></label>
+        <button class="btn" id="btnImportCancel">取消</button>
+        <span id="importMsg" class="msg"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>评估流水</h2>
+        <button class="btn small" id="btnReeval">⟳ 重新评估全部</button>
+      </div>
+      <div class="table-wrap">
+        <table id="alertsTable">
+          <thead>
+            <tr><th>#</th><th>设备</th><th>批次</th><th>级别</th><th>类型</th><th>时间</th><th>决定</th><th>解释</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="empty-hint" id="alertsEmpty">还没有告警。点击右上角“载入演示场景”，或手动注入一条。</p>
+    </div>
+  </section>
+
+  <!-- ========================= 规则 ========================= -->
+  <section id="tab-rules" class="tab-panel">
+    <div class="card">
+      <div class="card-head">
+        <h2 id="ruleFormTitle">新建规则</h2>
+        <button class="btn small hidden" id="btnEditCancel">取消编辑</button>
+      </div>
+      <div class="form-grid">
+        <label>规则名称<input type="text" id="rName" placeholder="例如：温度抖动去重" /></label>
+        <label>优先级（小=高）<input type="number" id="rPriority" value="100" min="1" max="10000" /></label>
+        <label>动作
+          <select id="rAction">
+            <option value="suppress">suppress 抑制</option>
+            <option value="pass">pass 放行（白名单）</option>
+          </select>
+        </label>
+        <label class="checkbox-cell"><input type="checkbox" id="rEnabled" checked /> <span>启用</span></label>
+        <label>设备匹配（逗号分隔，支持 PREFIX*，空=任意）<input type="text" id="rDevices" placeholder="FREEZER-01 或 REEFER-*" /></label>
+        <label>批次匹配（同上）<input type="text" id="rBatches" placeholder="B-2026-0901" /></label>
+        <label>级别匹配（逗号分隔，空=任意）<input type="text" id="rLevels" placeholder="info,warning,critical" /></label>
+        <label>时间窗（本地时间，支持跨零点，空=任意）<input type="text" id="rTimeWindow" placeholder="22:00-06:00" /></label>
+        <label>冷却窗口（秒，仅抑制生效；0=不做冷却）<input type="number" id="rCooldown" value="0" min="0" /></label>
+        <label>冷却维度
+          <select id="rScope">
+            <option value="device_batch">同设备 + 同批次</option>
+            <option value="device">同设备（任意批次）</option>
+            <option value="global">全局（任意设备批次）</option>
+          </select>
+        </label>
+        <label class="full">备注<input type="text" id="rNote" placeholder="这条规则的业务背景" /></label>
+      </div>
+      <div class="row-actions">
+        <button class="btn primary" id="btnRuleSave">保存规则</button>
+        <span id="ruleMsg" class="msg"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>规则列表（按优先级排序，取第一条命中）</h2>
+      </div>
+      <div class="table-wrap">
+        <table id="rulesTable">
+          <thead>
+            <tr><th>优先级</th><th>状态</th><th>名称</th><th>动作</th><th>设备</th><th>批次</th><th>级别</th><th>时间窗</th><th>冷却</th><th>操作</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="empty-hint" id="rulesEmpty">还没有规则——没有规则命中的告警将默认放行。</p>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>策略快照</h2>
+        <div class="inline-form">
+          <input type="text" id="versionLabel" placeholder="快照标签，如：维护窗口上线前" />
+          <button class="btn primary" id="btnVersionSave">保存当前规则为快照</button>
+        </div>
+      </div>
+      <p class="hint">快照冻结当时的全部规则；修改规则后，可在“③ 策略前后对比”标签页用快照作为基线，逐条比对每条告警的决定变化。</p>
+      <ul class="version-list" id="versionList"></ul>
+    </div>
+  </section>
+
+  <!-- ========================= 对比 ========================= -->
+  <section id="tab-compare" class="tab-panel">
+    <div class="card">
+      <h2>策略变更前后对比</h2>
+      <p class="hint">选择一个历史快照作为“变更前”基线，与“当前规则”在同一份告警上分别评估并逐条比对。</p>
+      <div class="row-actions">
+        <select id="baseVersion"></select>
+        <button class="btn primary" id="btnCompare">运行对比</button>
+        <span id="compareMsg" class="msg"></span>
+      </div>
+      <div id="compareSummary" class="compare-summary hidden"></div>
+    </div>
+    <div class="card hidden" id="compareCard">
+      <div class="table-wrap">
+        <table id="compareTable">
+          <thead>
+            <tr><th>#</th><th>设备</th><th>批次</th><th>级别</th><th>变更前</th><th>变更后</th><th>差异</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================= 接收端 ========================= -->
+  <section id="tab-receiver" class="tab-panel">
+    <div class="card">
+      <h2>内置模拟接收端</h2>
+      <p class="hint">
+        真实系统里抑制后的 PASS 告警通常会转发到 webhook / 短信 / 工单平台。
+        本沙盒内置一个接收端：注入即转发或手动重放的 PASS 告警会进入下方收件箱；
+        也可以用外部 HTTP 客户端直接 POST 验证：
+      </p>
+      <pre class="curl">curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"device_id":"FREEZER-01","level":"critical","message":"直发测试"}'</pre>
+      <div class="row-actions">
+        <button class="btn primary" id="btnForwardPending">重放所有未投递的 PASS</button>
+        <button class="btn danger-ghost" id="btnClearInbox">清空收件箱</button>
+        <span id="receiverMsg" class="msg"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>收件箱（最新在前）</h2>
+      <div id="inboxList" class="inbox-list"></div>
+      <p class="empty-hint" id="inboxEmpty">收件箱为空。</p>
+    </div>
+  </section>
+</main>
+
+<!-- 解释弹层 -->
+<div class="modal-mask hidden" id="explainModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="explainTitle">规则命中解释</h3>
+      <button class="btn small" id="explainClose">关闭</button>
+    </div>
+    <pre id="explainBody" class="explain-body"></pre>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
